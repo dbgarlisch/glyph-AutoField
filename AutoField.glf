@@ -182,15 +182,48 @@ namespace eval AutoField {
     # Update runtime data for this Wall BC
     upvar $unusedLaminaConsVar unusedLaminaCons
     set bcPlane [getNearFieldBCVal $Id ExtPlane]
+    set shadowCons {}
     if { [getNearFieldBCVal $Id ShadowType] == "DropShadow" } {
       # Capture drop shadow corner points
-      setNearFieldBCVal $Id DropShadowPts \
-        [set pts [projectExtsToRectInPlane [getGridVal SurfDomExts] $bcPlane]]
+      #setNearFieldBCVal $Id DropShadowPts \
+      #  [set pts [projectExtsToRectInPlane [getGridVal SurfDomExts] $bcPlane]]
+      set pts [projectExtsToRectInPlane [getGridVal SurfDomExts] $bcPlane]
       # Add shadow points to edges with which they are colinear
+      set ptInfo {}
       foreach pt $pts {
-        insertPtIntoAllNfEdges $pt SrcDropShadow
+        set ptType [insertPtIntoAllNfEdges $pt SrcDropShadow]
+        switch -- $ptType {
+        ColinearDup -
+        ColinearNew {
+          lappend ptInfo Edge $pt
+        }
+        NotColinear {
+          lappend ptInfo Interior $pt
+        }
+        default {
+          return -code error "Unexpected shadow point type ($ptType)"
+        }}
+      }
+
+      # build drop shadow cons that do NOT lie on outer loop edge
+      # grab first pair as previous pt
+      set ptInfo [lassign $ptInfo prevUsage prevPt]
+      # append first pair again to make logic simpler
+      lappend ptInfo $prevUsage $prevPt
+      for {set ii 0} {$ii < 4} {incr ii} {
+        set ptInfo [lassign $ptInfo usage pt]
+        if { "${prevUsage}${usage}" != "EdgeEdge" } {
+          # create shadow connector
+          set con [createCon $prevPt $pt]
+          $con setName "ShadowCon-1"
+          lappend shadowCons $con
+        }
+        set prevUsage $usage
+        set prevPt $pt
       }
     }
+    # Capture drop shadow cons
+    setNearFieldBCVal $Id DropShadowCons $shadowCons
     # Capture lamina cons that are coplanar with $bcPlane.
     setNearFieldBCVal $Id InPlnCons \
       [getInPlaneCons $unusedLaminaCons $bcPlane unusedLaminaCons]
@@ -420,47 +453,53 @@ namespace eval AutoField {
     set unclosedEdgeCons [list]
     foreach edge [pw::Edge createFromConnectors $inPlaneCons] {
       if { [$edge isClosed] } {
-        # cache the inner edge loop
+        # cache the inner edge loop connectors
         lappend closedEdgeCons [getConsFromPwEdge $edge]
-        continue
+      } else {
+        # Found an unclosed edge. Imprint endpoints on outer loop.
+        imprintEndPt [[$edge getNode Begin] getXYZ] "begin"
+        imprintEndPt [[$edge getNode End] getXYZ] "end"
+        lappend unclosedEdgeCons [getConsFromPwEdge $edge]
       }
-      # Found an unclosed edge. Confirm endpoints touch outer loop.
-      set begXYZ [[$edge getNode Begin] getXYZ]
-      set endXYZ [[$edge getNode End] getXYZ]
-      insertPtIntoAllNfEdges $begXYZ SrcInPlnCons ptType
-      if { ![regexp {Colinear(Dup|New)} $ptType] } {
-        return -code error "Unclosed edge begin node not on boundary"
-      }
-      insertPtIntoAllNfEdges $endXYZ SrcInPlnCons ptType
-      if { ![regexp {Colinear(Dup|New)} $ptType] } {
-        return -code error "Unclosed edge end node not on boundary"
-      }
-      lappend unclosedEdgeCons [getConsFromPwEdge $edge]
     }
     setNearFieldBCVal $Id InPlnClosedEdgeCons $closedEdgeCons
     setNearFieldBCVal $Id InPlnUnclosedEdgeCons $unclosedEdgeCons
   }
 
-  proc insertPtIntoAllNfEdges { pt src {ptTypeVar ""} } {
-    if { "" != "$ptTypeVar" } {
-      upvar $ptTypeVar ptType
+
+  proc imprintEndPt { xyz which } {
+    set ptType [insertPtIntoAllNfEdges $xyz SrcInPlnCons]
+    switch -- $ptType {
+    ColinearDup -
+    ColinearNew {
+      # all is good
     }
+    default {
+      return -code error "Unclosed edge $which node not on boundary ($ptType)"
+    }}
+  }
+
+
+  proc insertPtIntoAllNfEdges { pt src } {
+    set ptType {}
     set edgeDb [getGridVal NearFieldEdgeDb]
-    set edgesChanged 0
+    set edgeDbChanged 0
     for {set ii 0} {$ii < 12} {incr ii} {
       if { [insertPtIntoEdgeNdx edgeDb $ii $pt $src ptType] } {
-        # $pt added to edge $ii - we can stop looking
-        set edgesChanged 1
-        break
+        # $pt added to edge $ii (ptType = ColinearNew)
+        set edgeDbChanged 1
+        break ;# we can stop looking
       } elseif { [string match Colinear* $ptType] } {
-        # $pt not added to colinear to edge - we can stop looking
-        break
+        # $pt is colinear with but not added to edge because a point already
+        # exists (ptType = ColinearDup), or $pt is at or outside of edge's endpoints
+        # (ptType = ColinearLT0, Colinear0, Colinear1, or ColinearGT1).
+        break ;# we can stop looking
       }
     }
-    if { $edgesChanged } {
+    if { $edgeDbChanged } {
       setGridVal NearFieldEdgeDb $edgeDb
     }
-    return $edgesChanged
+    return $ptType
   }
 
   proc getConsFromPwEdge { edge } {
@@ -662,6 +701,12 @@ namespace eval AutoField {
   }
 
   proc createNearFieldDomWall { bcId edgeIds edgeBcIds } {
+    set shadowCons [getNearFieldBCVal $bcId DropShadowCons]
+    if { 0 != [llength $shadowCons] } {
+      # TODO
+    } else {
+      # TODO
+    }
     set cons {}
     foreach edgeId $edgeIds edgeBcId $edgeBcIds {
       lappend cons {*}[getEdgeCons $edgeId]

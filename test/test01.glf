@@ -1,7 +1,7 @@
 package require PWI_Glyph 2.18
 
 set scriptDir [file dirname [info script]]
-source [file join $scriptDir AutoField.glf]
+source [file join $scriptDir .. AutoField.glf]
 
 
 proc getDomains { domsVar } {
@@ -59,6 +59,17 @@ proc setupNoDb {} {
   AutoField setNearFieldBC z+ Margin 150.0
 }
 
+proc setupHalfPlane {} {
+  pw::Application load [file join $::scriptDir halfPlane.pw]
+
+  AutoField setNearFieldBC x- Symmetry
+  AutoField setNearFieldBC x+ Margin 100.0
+  AutoField setNearFieldBC y- Margin 50.0
+  AutoField setNearFieldBC y+ Margin 50.0
+  AutoField setNearFieldBC z- Margin 200.0
+  AutoField setNearFieldBC z+ Margin 100.0
+}
+
 ##########################################################################
 #                             Main
 ##########################################################################
@@ -66,6 +77,7 @@ AutoField setVerbose
 
 pw::Application reset
 
+#setupHalfPlane
 #setupNoDb
 #setupNoDbHALF
 setupNoDbHALFUnclosed
