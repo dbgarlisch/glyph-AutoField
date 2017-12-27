@@ -1537,9 +1537,9 @@ namespace eval AutoField {
           set srcs [dict get $ptsSrcs Srcs]
           set pts [lassign $pts pt]
           set srcs [lassign $srcs src]
-          puts [format "  Edge %2.2s Pts: %s (%s)" "$ndx" [list $pt] $src]
+          puts [format "  Edge %2.2s Pts: %s (%s)" "$ndx" [aPwpnt $pt] $src]
           foreach pt $pts src $srcs {
-            puts [format "               %s (%s)" [list $pt] $src]
+            puts [format "               %s (%s)" [list [aPwpnt $pt]] $src]
           }
         }
       }
@@ -1568,7 +1568,7 @@ namespace eval AutoField {
     }
     ::pw::* {
       if { 1 == [llength $v] } {
-        set v [$v getName]
+        set v "<a href='pwent://pwi.app?ents=${v}'>[$v getName]</a>"
       } else {
         set tmp {}
         foreach pw $v {
@@ -1578,8 +1578,29 @@ namespace eval AutoField {
       }
     }
     default {
+      if { [isXYZ $v] } {
+        set v [aPwpnt $v]
+      }
     }}
     return $v
+  }
+
+  proc isXYZ { xyz } {
+    set ret 0
+    if { 3 == [llength $xyz] } {
+      set ret 1
+      foreach v $xyz {
+        if { ![string is double -strict $v] } {
+          set ret 0
+          break
+        }
+      }
+    }
+    return $ret
+  }
+
+  proc aPwpnt { xyz } {
+    return "<a href='pwpnt://pwi.app?loc=$xyz'>$xyz</a>"
   }
 
   namespace ensemble create
