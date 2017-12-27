@@ -185,8 +185,6 @@ namespace eval AutoField {
     set shadowCons {}
     if { [getNearFieldBCVal $Id ShadowType] == "DropShadow" } {
       # Capture drop shadow corner points
-      #setNearFieldBCVal $Id DropShadowPts \
-      #  [set pts [projectExtsToRectInPlane [getGridVal SurfDomExts] $bcPlane]]
       set pts [projectExtsToRectInPlane [getGridVal SurfDomExts] $bcPlane]
       # Add shadow points to edges with which they are colinear
       set ptInfo {}
@@ -221,6 +219,8 @@ namespace eval AutoField {
         set prevUsage $usage
         set prevPt $pt
       }
+      # 3 if symmetry BC defined, else 4
+      assertRange [llength $shadowCons] 3 4 "Shadow Connector Count"
     }
     # Capture drop shadow cons
     setNearFieldBCVal $Id DropShadowCons $shadowCons
@@ -340,7 +340,7 @@ namespace eval AutoField {
     #lappend cons [setCon CI [createCon [getPt 5] [getPt 4]]]
     #lappend cons [setCon CE [createCon [getPt 4] [getPt 0]]]
     #setConSpacing [getEdgeCons CE] $blGrowthRate_ $nfSpacing_ $nfSpacing_ $blInitialDs_
-    #lappend doms [setDom DA [pw::DomainStructured createFromConnectors $cons]]
+    #lappend doms [setBcDoms DA [pw::DomainStructured createFromConnectors $cons]]
     #
     #
     #set cons [getEdgeCons CB]
@@ -348,7 +348,7 @@ namespace eval AutoField {
     #setConSpacing [getEdgeCons CG] $blGrowthRate_ $nfSpacing_ $blInitialDs_ $nfSpacing_
     #lappend cons [setCon CJ [createCon [getPt 6] [getPt 5]]]
     #lappend cons [getEdgeCons CF]
-    #lappend doms [setDom DB [pw::DomainStructured createFromConnectors $cons]]
+    #lappend doms [setBcDoms DB [pw::DomainStructured createFromConnectors $cons]]
     #
     #
     #set cons [getEdgeCons CC]
@@ -356,21 +356,21 @@ namespace eval AutoField {
     #lappend cons [setCon CK [createCon [getPt 6] [getPt 7]]]
     #lappend cons [setCon CH [createCon [getPt 7] [getPt 3]]]
     #setConSpacing [getEdgeCons CH] $blGrowthRate_ $nfSpacing_ $nfSpacing_ $blInitialDs_
-    #lappend doms [setDom DC [pw::DomainStructured createFromConnectors $cons]]
+    #lappend doms [setBcDoms DC [pw::DomainStructured createFromConnectors $cons]]
     #
     #
     #set cons [getEdgeCons CD]
     #lappend cons [getEdgeCons CH]
     #lappend cons [setCon CL [createCon [getPt 7] [getPt 4]]]
     #lappend cons [getEdgeCons CE]
-    #lappend doms [setDom DD [pw::DomainStructured createFromConnectors $cons]]
+    #lappend doms [setBcDoms DD [pw::DomainStructured createFromConnectors $cons]]
     #
     #
     #set cons [getEdgeCons CI]
     #lappend cons [getEdgeCons CJ]
     #lappend cons [getEdgeCons CK]
     #lappend cons [getEdgeCons CL]
-    #lappend doms [setDom DE [pw::DomainStructured createFromConnectors $cons]]
+    #lappend doms [setBcDoms DE [pw::DomainStructured createFromConnectors $cons]]
     #
     #set blk [setBlk NearFieldBlk [pw::BlockUnstructured createFromDomains $doms]]
     #$blk setName "Near Field"
@@ -693,20 +693,39 @@ namespace eval AutoField {
       return -code error \
         "Unexpected projection in projectExtsToRectInPlane [list $diag]"
     }
-    #[pw::Point create] setPoint $pt0
-    #[pw::Point create] setPoint $pt1
-    #[pw::Point create] setPoint $pt2
-    #[pw::Point create] setPoint $pt3
     return [list $pt0 $pt1 $pt2 $pt3]
   }
 
   proc createNearFieldDomWall { bcId edgeIds edgeBcIds } {
+    # Three possibilities:
+    #  * No shadow domain (OL)
+    #  * Interior shadow domain (OL+SL)
+    #  * NoShadow domain touches outer loop (CL+SL)
+    #
+    #     *--------*    *--------*    *--------*
+    #     |   OL   |    |   OL   |    |   CL   |
+    #     |        |    |  *--*  |    |  *--*  |
+    #     |        |    |  |SL|  |    |  |SL|  |
+    #     |        |    |  *--*  |    |  |  |  |
+    #     *--------*    *--------*    *--*--*--*  <--- split symmetry edge
     set shadowCons [getNearFieldBCVal $bcId DropShadowCons]
-    if { 0 != [llength $shadowCons] } {
-      # TODO
-    } else {
-      # TODO
+    switch -- [llength $shadowCons] {
+    0 { # no shadow
+      createNearFieldDomWallNoShadow $bcId $edgeIds $edgeBcIds
     }
+    3 { # CL and SL
+      createNearFieldDomWallCLoop $bcId $edgeIds $edgeBcIds $shadowCons
+    }
+    4 { # OL and SL
+      createNearFieldDomWallOLoop $bcId $edgeIds $edgeBcIds $shadowCons
+    }
+    default {
+      return -code error "Invalid shadow"
+    }}
+  }
+
+  proc createNearFieldDomWallNoShadow { bcId edgeIds edgeBcIds } {
+    puts "createNearFieldDomWallNoShadow $bcId"
     set cons {}
     foreach edgeId $edgeIds edgeBcId $edgeBcIds {
       lappend cons {*}[getEdgeCons $edgeId]
@@ -718,7 +737,7 @@ namespace eval AutoField {
       foreach unclosedCons $unclosedEdgeCons {
         lappend cons {*}$unclosedCons
       }
-      set dom [setDom $bcId [pw::DomainUnstructured createFromConnectors $cons]]
+      set dom [setBcDoms $bcId [pw::DomainUnstructured createFromConnectors $cons]]
       set cons {}
       foreach closedCons $closedEdgeCons {
         lappend cons {*}$closedCons
@@ -726,8 +745,53 @@ namespace eval AutoField {
       insertLoopEdges $dom $cons
     } else {
       # outer loop does not use inplane cons AND there are zero inner loops
-      setDom $bcId [pw::DomainStructured createFromConnectors $cons]
+      setBcDoms $bcId [pw::DomainStructured createFromConnectors $cons]
     }
+  }
+
+  proc createNearFieldDomWallCLoop { bcId edgeIds edgeBcIds shadowCons } {
+    puts "createNearFieldDomWallCLoop $bcId"
+    set unclosedEdgeCons [getNearFieldBCVal $bcId InPlnUnclosedEdgeCons]
+    set closedEdgeCons [getNearFieldBCVal $bcId InPlnClosedEdgeCons]
+    set cloopCons $shadowCons
+    foreach edgeId $edgeIds edgeBcId $edgeBcIds {
+      set edgeCons [getEdgeCons $edgeId]
+      if { 1 == [llength $edgeCons] } {
+        # single con from unsplit edge
+        lappend cloopCons {*}$edgeCons
+      } else {
+        # First and last cons are part of cloop
+        lappend cloopCons [lindex $edgeCons 0]
+        lappend cloopCons [lindex $edgeCons end]
+        # Second through end-1 cons are part of shadow loop
+        lappend shadowCons {*}[lrange $edgeCons 1 end-1]
+      }
+    }
+    # add unclosed edge cons to shadow loop
+    foreach unclosedCons $unclosedEdgeCons {
+      lappend shadowCons {*}$unclosedCons
+    }
+    # Build shadow domain
+    set shadowDom [pw::DomainUnstructured createFromConnectors $shadowCons]
+    # Add any inner loops to shadow domain
+    set innerLoopCons {}
+    foreach closedCons $closedEdgeCons {
+      lappend innerLoopCons {*}$closedCons
+    }
+    insertLoopEdges $shadowDom $innerLoopCons
+    # Build cloop domain
+    set cloopDom [pw::DomainUnstructured createFromConnectors $cloopCons]
+    setBcDoms $bcId [list $shadowDom $cloopDom]
+  }
+
+  proc createNearFieldDomWallOLoop { bcId edgeIds edgeBcIds shadowCons } {
+    puts "createNearFieldDomWallOLoop $bcId"
+    set cons {}
+    foreach edgeId $edgeIds edgeBcId $edgeBcIds {
+      lappend cons {*}[getEdgeCons $edgeId]
+    }
+    # Add SL as an inner edge of OL
+    lappend closedEdgeCons $shadowCons
   }
 
   proc createNearFieldDomMargin { bcId edgeIds edgeBcIds } {
@@ -735,7 +799,7 @@ namespace eval AutoField {
     foreach edgeId $edgeIds edgeBcId $edgeBcIds {
       lappend cons {*}[getEdgeCons $edgeId]
     }
-    setDom $bcId [pw::DomainStructured createFromConnectors $cons]
+    setBcDoms $bcId [pw::DomainStructured createFromConnectors $cons]
   }
 
   proc createNearFieldDomSymmetry { bcId edgeIds edgeBcIds } {
@@ -747,7 +811,7 @@ namespace eval AutoField {
     foreach unclosedCons $unclosedEdgeCons {
       lappend cons {*}$unclosedCons
     }
-    set dom [setDom $bcId [pw::DomainUnstructured createFromConnectors $cons]]
+    set dom [setBcDoms $bcId [pw::DomainUnstructured createFromConnectors $cons]]
     set cons {}
     foreach closedCons [getNearFieldBCVal $bcId InPlnClosedEdgeCons] {
       lappend cons {*}$closedCons
@@ -1021,13 +1085,16 @@ namespace eval AutoField {
     getGridVal Cons $key
   }
 
-  proc setDom {key dom} {
-    if { "" == "$dom" } {
-      return -code error "Invalid domain for setDom($key)"
+  proc setBcDoms {key doms} {
+    if { 0 == [set domCnt [llength $doms]] } {
+      return -code error "Invalid domain for setBcDoms($key)"
     }
-    setGridVal Domains $key $dom
-    $dom setName "NfDom_$key"
-    return $dom
+    setGridVal BcDomains $key $doms
+    set sfx [expr {$domCnt > 1 ? "-1" : ""}]
+    foreach dom $doms {
+      $dom setName "NfDom_$key$sfx"
+    }
+    return $doms
   }
 
   #proc getDom {key} {
@@ -1202,7 +1269,7 @@ namespace eval AutoField {
   #  lappend innerCons [setCon CO [createCon [getPt 11] [getPt 10] ]]
   #  lappend innerCons [setCon CN [createCon [getPt 10] [getPt 9] ]]
   #  # puts "##################### innerCons: $innerCons"
-  #  set innerDom [setDom DF [pw::DomainUnstructured createFromConnectors $innerCons]]
+  #  set innerDom [setBcDoms DF [pw::DomainUnstructured createFromConnectors $innerCons]]
   #  #insertLoopEdges $innerDom [getGridVal InPlnCons]
   #
   #  set outerCons {}
@@ -1210,7 +1277,7 @@ namespace eval AutoField {
   #  lappend outerCons [setCon CB [createCon [getPt 1] [getPt 2] ]]
   #  lappend outerCons [setCon CC [createCon [getPt 2] [getPt 3] ]]
   #  lappend outerCons [setCon CD [createCon [getPt 3] [getPt 0] ]]
-  #  set outerDom [setDom DG [pw::DomainUnstructured createFromConnectors $outerCons]]
+  #  set outerDom [setBcDoms DG [pw::DomainUnstructured createFromConnectors $outerCons]]
   #  addEdgeToDom $outerDom $innerCons
   #}
 
@@ -1600,7 +1667,19 @@ namespace eval AutoField {
   }
 
   proc aPwpnt { xyz } {
-    return "<a href='pwpnt://pwi.app?loc=$xyz'>$xyz</a>"
+    lassign $xyz x y z
+    if { [isZero $x] } {
+      set x 0.0
+    }
+    if { [isZero $y] } {
+      set y 0.0
+    }
+    if { [isZero $z] } {
+      set z 0.0
+    }
+    set txt [format "%.10g %.10g %.10g" $x $y $z]
+    set xyz [list $x $y $z]
+    return "<a href='pwpnt://pwi.app?loc=$xyz'>$txt</a>"
   }
 
   namespace ensemble create

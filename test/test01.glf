@@ -26,36 +26,36 @@ proc getDomains { domsVar } {
 }
 
 
-proc setupNoDbHALF {} {
+proc setupNoDbHALF { {shadowType DropShadow} } {
   pw::Application load [file join $::scriptDir bodyDomains-NoDb-HALF.pw]
 
   AutoField setNearFieldBC x- Margin 110.0
   AutoField setNearFieldBC x+ Margin 220.0
   AutoField setNearFieldBC y- Symmetry
   AutoField setNearFieldBC y+ Margin 240.0
-  AutoField setNearFieldBC z- Wall 0.01 1.2 DropShadow
+  AutoField setNearFieldBC z- Wall 0.01 1.2 $shadowType
   AutoField setNearFieldBC z+ Margin 150.0
 }
 
-proc setupNoDbHALFUnclosed {} {
+proc setupNoDbHALFUnclosed { {shadowType DropShadow} } {
   pw::Application load [file join $::scriptDir bodyDomains-NoDb-HALF-unclosed.pw]
 
   AutoField setNearFieldBC x- Margin 110.0
   AutoField setNearFieldBC x+ Margin 220.0
   AutoField setNearFieldBC y- Symmetry
   AutoField setNearFieldBC y+ Margin 240.0
-  AutoField setNearFieldBC z- Wall 0.01 1.2 DropShadow
+  AutoField setNearFieldBC z- Wall 0.01 1.2 $shadowType
   AutoField setNearFieldBC z+ Margin 150.0
 }
 
-proc setupNoDb {} {
+proc setupNoDb { {shadowType DropShadow} } {
   pw::Application load [file join $::scriptDir bodyDomains-NoDb.pw]
 
   AutoField setNearFieldBC x- Margin 110.0
   AutoField setNearFieldBC x+ Margin 220.0
   AutoField setNearFieldBC y- Margin 340.0
   AutoField setNearFieldBC y+ Margin 240.0
-  AutoField setNearFieldBC z- Wall 0.01 1.2 DropShadow
+  AutoField setNearFieldBC z- Wall 0.01 1.2 $shadowType
   AutoField setNearFieldBC z+ Margin 150.0
 }
 
@@ -78,9 +78,9 @@ AutoField setVerbose
 pw::Application reset
 
 #setupHalfPlane
-#setupNoDb
-#setupNoDbHALF
-setupNoDbHALFUnclosed
+#setupNoDb NoShadow
+#setupNoDbHALF NoShadow
+setupNoDbHALFUnclosed ;# NoShadow
 
 if { [getDomains doms] } {
   if { ![catch {AutoField run $doms} err] } {
